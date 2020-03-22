@@ -1,0 +1,10 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/586906/a1aae9aaa3e846578a92fc75b55067f2
+bundleId: https://api.rpubs.com/api/v1/document/586906/a1aae9aaa3e846578a92fc75b55067f2
+url: http://rpubs.com/YesKay/586906
+when: 1584884687.1565

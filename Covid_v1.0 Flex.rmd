@@ -1,0 +1,988 @@
+---
+title: "Covid-19 Tracker"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    social: menu
+    source_code: embed
+    vertical_layout: fill
+---
+
+
+```{r setup, include=FALSE}
+
+
+###-----Packages-----
+
+library(flexdashboard)
+library(dplyr)
+library(plotly)
+library(devtools)
+library(knitr)
+library(RCurl)
+library(tidyr)
+library(tidyverse)
+
+###----Input Date to Dataframe---- 
+coronavirus <- read.csv("https://raw.githubusercontent.com/RamiKrispin/coronavirus-csv/master/coronavirus_dataset.csv", header = TRUE)
+
+###-----Parameters-----
+
+confirmed_color <- "royalblue"
+active_color <- "darkslateblue"
+recovered_color <- "green"
+death_color <- "red"
+
+
+###--- Data Preparation------
+
+df <- coronavirus %>% 
+  # dplyr::filter(date == max(date)) %>%
+  dplyr::group_by(Country.Region, type) %>%
+  dplyr::summarise(total = sum(cases)) %>%
+  tidyr::pivot_wider(names_from =  type, 
+                     values_from = total) %>%
+  dplyr::mutate(unrecovered = confirmed - ifelse(is.na(recovered), 0, recovered) - ifelse(is.na(death), 0, death)) %>%
+  dplyr::arrange(-confirmed) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(country = Country.Region) %>%
+  dplyr::mutate(country = trimws(country)) %>% 
+  dplyr::mutate(country = factor(country, levels = country))
+
+
+df_daily <- coronavirus %>% 
+  dplyr::group_by(date, type) %>%
+  dplyr::summarise(total = sum(cases, na.rm = TRUE)) %>%
+  tidyr::pivot_wider(names_from = type,
+                     values_from = total) %>%
+  dplyr::arrange(date) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(active =  confirmed - death - recovered) %>%
+  dplyr::mutate(confirmed_cum = cumsum(confirmed),
+                death_cum = cumsum(death),
+                recovered_cum = cumsum(recovered),
+                active_cum = cumsum(active))
+
+df_Country <- coronavirus %>% 
+  dplyr::group_by(date, type, Country.Region) %>%
+  dplyr::summarise(total = sum(cases, na.rm = TRUE)) %>%
+  tidyr::pivot_wider(names_from = type,
+                     values_from = total) %>%
+  dplyr::arrange(date) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(active =  confirmed - death - recovered) %>%
+  dplyr::mutate(confirmed_cum = cumsum(confirmed),
+                death_cum = cumsum(death),
+                recovered_cum = cumsum(recovered),
+                active_cum = cumsum(active))
+
+
+df1 <- coronavirus %>%
+  dplyr:: mutate(date = as.Date(date))%>%
+  dplyr::filter(date == max(date))
+
+```
+
+
+SUMMARY DASHBOARD
+===============================================================================
+
+row {row-height=100}
+-----------------------------------------------------------------------
+
+### confirmed {.value-box}
+```{r}
+valueBox(value = paste(format(sum(df$confirmed), big.mark = ","), "", sep = " "), 
+         caption = "Total Confirmed Cases", 
+         icon = "fas fa-user-md", 
+         color = confirmed_color)
+```
+
+### active {.value-box}
+```{r}
+valueBox(value = paste(format(sum(df$unrecovered, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(df$unrecovered, na.rm = TRUE) / sum(df$confirmed), 1), 
+                       "%)", sep = ""), 
+         caption = "Active Cases", icon = "fas fa-hospital", 
+         color = active_color)
+```
+
+### recovered {.value-box}
+```{r}
+valueBox(value = paste(format(sum(df$recovered, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(df$recovered, na.rm = TRUE) / sum(df$confirmed), 1), 
+                       "%)", sep = ""), 
+         caption = "Recovered Cases", icon = "fas fa-running", 
+         color = recovered_color)
+
+```
+
+### deaths {.value-box}
+```{r}
+valueBox(value = paste(format(sum(df$death, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(df$death, na.rm = TRUE) / sum(df$confirmed), 1), 
+                       "%)", sep = ""),
+         caption = "Death Cases", 
+         icon = "fas fa-heart-broken", 
+         color = death_color)
+
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### CASES BY COUNTRY (TOP 25)
+
+```{r}
+
+plotly::plot_ly(data = df[1:25,], 
+                x = ~ country, 
+                y = ~ unrecovered, 
+                # text =  ~ confirmed, 
+                # textposition = 'auto',
+                type = "bar", 
+                name = "Active",
+                marker = list(color = active_color)) %>%
+  plotly::add_trace(y = ~ recovered, 
+                    # text =  ~ recovered, 
+                    # textposition = 'auto',
+                    name = "Recovered",
+                    marker = list(color = recovered_color)) %>%
+  plotly::add_trace(y = ~ death, 
+                    # text =  ~ death, 
+                    # textposition = 'auto',
+                    name = "Death",
+                    marker = list(color = death_color)) %>%
+  plotly::layout(barmode = 'stack',
+                 yaxis = list(title = "Total Cases (log scaled)",
+                              type = "log"),
+                 xaxis = list(title = ""),
+                 hovermode = "compare",
+                  margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### DAILY CUMULATIVE BY TYPE
+
+```{r}
+plotly::plot_ly(data = df_daily) %>%
+  plotly::add_trace(x = ~ date,
+                    y = ~ active_cum,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    name = "Active",
+                    line = list(color = active_color),
+                    marker = list(color = active_color)) %>%
+  plotly::add_trace(x = ~ date,
+                    y = ~ recovered_cum,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    name = "Recovered",
+                    line = list(color = recovered_color),
+                    marker = list(color = recovered_color)) %>%
+  plotly::add_trace(x = ~ date,
+                    y = ~ death_cum,
+                    type = "scatter",
+                    mode = 'lines+markers',
+                    name = "Death",
+                    line = list(color = death_color),
+                    marker = list(color = death_color)) %>%
+  plotly::layout(title = "",
+                 yaxis = list(title = "Cum. #Cases"),
+                 xaxis = list(title = "Date"),
+                 legend = list(x = 0.1, y = 0.9),
+                 hovermode = "compare")
+
+
+
+
+```
+
+### CARE
+
+```{r}
+
+
+```
+__Coronaviruses (CoV)__ are a large family of viruses that cause illness ranging from the common cold to more severe diseases such as Middle East Respiratory Syndrome (MERS-CoV) and Severe Acute Respiratory Syndrome (SARS-CoV).
+
+Coronavirus disease (COVID-19) is a new strain that was discovered in 2019 and has not been previously identified in humans.
+
+
+Common signs of infection include respiratory symptoms, fever, cough, shortness of breath and breathing difficulties. In more severe cases, infection can cause pneumonia, severe acute respiratory syndrome, kidney failure and even death. 
+
+Standard recommendations to prevent infection spread include regular hand washing, covering mouth and nose when coughing and sneezing, thoroughly cooking meat and eggs. Avoid close contact with anyone showing symptoms of respiratory illness such as coughing and sneezing..  
+
+LINKS: 
+[DONATE](https://www.who.int/emergencies/diseases/novel-coronavirus-2019/donate), 
+[KNOW MORE](https://www.who.int/emergencies/diseases/novel-coronavirus-2019), 
+[JHU](https://www.arcgis.com/apps/opsdashboard/index.html#/bda7594740fd40299423467b48e9ecf6), 
+[CONTRIBUTORS](https://github.com/RamiKrispin)
+
+
+HOT SPOTS -1
+=====================================================================================
+row {.tabset}
+-------------------------------------
+### AMERICAS
+    
+```{r}
+daily_confirmed <- coronavirus %>%
+  dplyr::filter(type == "confirmed") %>%
+  dplyr::mutate(country = Country.Region) %>%
+  dplyr::group_by(date, country) %>%
+  dplyr::summarise(total = sum(cases)) %>% 
+  dplyr::ungroup() %>%
+  tidyr::pivot_wider(names_from = country, values_from = total) 
+
+#----------------------------------------
+# Plotting the data
+
+daily_confirmed %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ US, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "US") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Canada, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Canada") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Brazil, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Brazil") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Mexico, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Mexico") %>%
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Daily Cases"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "#ffcccc",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+
+
+```
+ 
+### GC & OCEANIA 
+    
+```{r}
+daily_confirmed %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ China, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "China") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ `Korea, South`, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "South Korea") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Japan, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Japan") %>%
+  plotly::add_trace(x = ~ date, 
+                    y = ~ `New Zealand`, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "New Zealand") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Australia, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Australia") %>%
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Daily Cases"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "#ccffcc",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+
+``` 
+
+row {.tabset}
+-------------------------------------
+### SAP
+```{r}
+daily_confirmed %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ India, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "India") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Pakistan, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Pakistan") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Bangladesh, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Bangladesh") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Malaysia, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Malaysia") %>%
+  plotly::add_trace(x = ~ date, 
+                    y = ~ 	Indonesia, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Indonesia") %>%
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Daily Cases"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "#ccccff",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+```
+
+### EUROPE
+
+```{r}
+daily_confirmed %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Italy, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Italy") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Spain, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Spain") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Germany, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Germany") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ `United Kingdom`, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "UK") %>%
+  plotly::add_trace(x = ~ date, 
+                    y = ~ 	France, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "France") %>%
+    plotly::add_trace(x = ~ date, 
+                    y = ~ 	France, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Spain") %>%
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Daily Cases"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "#ccffff",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+
+```
+
+
+
+HOT SPOTS -2
+===================================================================================
+
+row 
+-----------------------------------------------------------------------
+
+### Cum Confirmed Cases by Country
+
+```{r}
+df_Country_Confirmed <- df_Country %>%  
+  dplyr:: select(date, Country.Region, confirmed)%>%
+  tidyr::pivot_wider(names_from = Country.Region,
+                     values_from = confirmed) %>%
+  dplyr::select(date,	US, China, Italy, Iran, Germany, `Korea, South`, Spain ) %>%
+  dplyr::mutate(US_cum = cumsum(US),
+                China_cum = cumsum(China),
+                Italy_cum = cumsum(Italy),
+                Germany_cum = cumsum(Germany),
+                Iran_cum = cumsum(Iran),
+                Spain_cum = cumsum(Spain),
+                Korea_cum = cumsum(`Korea, South`))
+
+df_Country_Confirmed %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ US_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "US") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ China_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "China") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Italy_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Italy") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Iran_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Iran") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Germany_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Germany") %>%
+  
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Korea_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "S.Korea") %>%
+   
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Spain_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Spain") %>%
+  
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Cum. Confirmed"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "ffffcc",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+
+
+```
+
+### Cum Deaths by Country
+
+
+
+
+```{r}
+df_Country_Death <- df_Country %>%  
+  dplyr:: select(date, Country.Region, death)%>%
+  tidyr::pivot_wider(names_from = Country.Region,
+                     values_from = death) %>%
+  dplyr::select(date,	US, China, Italy, Iran, Germany, `Korea, South`, Spain) %>%
+  dplyr::mutate(US_cum = cumsum(US),
+                China_cum = cumsum(China),
+                Italy_cum = cumsum(Italy),
+                Germany_cum = cumsum(Germany),
+                Iran_cum = cumsum(Iran),
+                Spain_cum = cumsum(Spain),
+                Korea_cum = cumsum(`Korea, South`))
+  
+df_Country_Death %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ US_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "US") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ China_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "China") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Italy_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Italy") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Iran_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Iran") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Germany_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Germany") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Korea_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "S.Korea") %>%
+  
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Spain_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Spain") %>%
+  
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Cum. Death"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "ffcccc",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+```
+
+
+row
+-----------------------------------------------------------------------
+
+### Cum Recovered by Country 
+
+```{r}
+
+df_Country_Recovered <- df_Country %>%  
+  dplyr:: select(date, Country.Region, recovered)%>%
+  tidyr::pivot_wider(names_from = Country.Region,
+                     values_from = recovered) %>%
+  dplyr::select(date,	US, China, Italy, Iran, Germany, `Korea, South`, Spain ) %>%
+  dplyr::mutate(US_cum = cumsum(US),
+                China_cum = cumsum(China),
+                Italy_cum = cumsum(Italy),
+                Germany_cum = cumsum(Germany),
+                Iran_cum = cumsum(Iran),
+                Spain_cum = cumsum(Spain),
+                Korea_cum = cumsum(`Korea, South`))
+
+df_Country_Recovered %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ US_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "US") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ China_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "China") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Italy_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Italy") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Iran_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Iran") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Germany_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Germany") %>%
+  
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Korea_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "S.Korea") %>%
+  
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Spain_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Spain") %>%
+  
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Cum. Recovered"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "99ff99",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+
+
+
+```
+
+### Cum Active by Country
+
+```{r}
+
+df_Country_Active <- df_Country %>%  
+  dplyr:: select(date, Country.Region, active)%>%
+  tidyr::pivot_wider(names_from = Country.Region,
+                     values_from = active) %>%
+  dplyr::select(date,	US, China, Italy, Iran, Germany, `Korea, South`, Spain) %>%
+  dplyr::mutate(US_cum = cumsum(US),
+                China_cum = cumsum(China),
+                Italy_cum = cumsum(Italy),
+                Germany_cum = cumsum(Germany),
+                Iran_cum = cumsum(Iran),
+                Spain_cum = cumsum(Spain),
+                Korea_cum = cumsum(`Korea, South`))
+  
+df_Country_Active %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ US_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "US") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ China_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "China") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Italy_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Italy") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Iran_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Iran") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Germany_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Germany") %>%
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Korea_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "S Korea") %>%
+  
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Spain_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Spain") %>%
+  
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Cum. Active"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 plot_bgcolor = "99ddff",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+```
+
+
+
+MAPS
+====================================================================================
+
+**Map**
+
+```{r}
+# map tab added by Art Steinmetz
+library(leaflet)
+library(leafpop)
+library(purrr)
+cv_data_for_plot <- coronavirus %>% 
+  dplyr::filter(cases > 0) %>% 
+  dplyr::group_by(Country.Region,Province.State,Lat,Long,type) %>% 
+  dplyr::summarise(cases = sum(cases)) %>% 
+  dplyr::mutate(log_cases = 2 * log(cases)) %>% 
+  dplyr::ungroup()
+cv_data_for_plot.split <- cv_data_for_plot %>% split(cv_data_for_plot$type)
+pal <- colorFactor(c("orange", "red","green"), domain = c("confirmed", "death","recovered"))
+map_object <- leaflet() %>% addProviderTiles(providers$Stamen.Toner)
+names(cv_data_for_plot.split) %>%
+  purrr::walk( function(df) {
+    map_object <<- map_object %>%
+      addCircleMarkers(data=cv_data_for_plot.split[[df]],
+                 lng=~Long, lat=~Lat,
+#                 label=~as.character(cases),
+                 color = ~pal(type),
+                 stroke = FALSE,
+                 fillOpacity = 0.65,
+                 radius = ~log_cases,
+                 popup =  leafpop::popupTable(cv_data_for_plot.split[[df]],
+                                              feature.id = FALSE,
+                                              row.numbers = FALSE,
+                                              zcol=c("type","cases","Country.Region","Province.State")),
+                 group = df,
+#                 clusterOptions = markerClusterOptions(removeOutsideVisibleBounds = F),
+                 labelOptions = labelOptions(noHide = F,
+                                             direction = 'auto'))
+  })
+map_object %>%
+  addLayersControl(
+    overlayGroups = names(cv_data_for_plot.split),
+    options = layersControlOptions(collapsed = FALSE) 
+  )
+```
+
+
+
+
+
+
+
+
+EVENTS
+====================================================================================
+
+```{r}
+df_Country_Confirmed <- df_Country %>%  
+  dplyr:: select(date, Country.Region, confirmed)%>%
+  tidyr::pivot_wider(names_from = Country.Region,
+                     values_from = confirmed) %>%
+  dplyr::select(date,	US, China, Italy, Iran, Germany, `Korea, South`, Spain, India, France, Japan) %>%
+  dplyr::mutate(US_cum = cumsum(US),
+                China_cum = cumsum(China),
+                Italy_cum = cumsum(Italy),
+                Germany_cum = cumsum(Germany),
+                Iran_cum = cumsum(Iran),
+                India_cum = cumsum(India),
+                Spain_cum = cumsum(Spain),
+                France_cum = cumsum(France),
+                Japan_cum = cumsum(Japan),
+                Korea_cum = cumsum(`Korea, South`))
+
+df_Country_Confirmed %>%
+  plotly::plot_ly() %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ US_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "US") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ China_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "China") %>% 
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Italy_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Italy") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Iran_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Iran") %>%
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Germany_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Germany") %>%
+  
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Korea_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "S.Korea") %>%
+  
+  plotly::add_trace(x = ~ date, 
+                    y = ~ India_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "India") %>%
+  
+  plotly::add_trace(x = ~ date, 
+                    y = ~ France_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "France") %>%
+  
+   plotly::add_trace(x = ~ date, 
+                    y = ~ Spain_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Spain") %>%
+  
+  plotly::add_trace(x = ~ date, 
+                    y = ~ Japan_cum, 
+                    type = "scatter", 
+                    mode = "lines+markers",
+                    name = "Japan") %>%
+  
+  plotly::add_annotations(x = as.Date("2020-02-13"),
+                          y = 44779,
+                          text = paste("CHINA MODIFIES TESTING"),
+                          font = list(color = '#ff9900', family = 'calibri', size = 10),
+                          xref = "x",
+                          yref = "y",
+                          arrowhead = 4,
+                          arrowhead = 3,
+                          arrowsize = 0.4,
+                          showarrow = TRUE,
+                          ax = 50,
+                          ay = -40)%>%
+  
+  plotly::add_annotations(x = as.Date("2020-01-23"),
+                          y = 643,
+                          text = paste("HUBEI LOCKS DOWN"),
+                          font = list(color = '#ff9900', family = 'calibri', size = 10),
+                          xref = "x",
+                          yref = "y",
+                          arrowhead = 4,
+                          arrowhead = 3,
+                          arrowsize = 0.4,
+                          showarrow = TRUE,
+                          ax = 50,
+                          ay = -40)%>%
+  
+  plotly::add_annotations(x = as.Date("2020-02-17"),
+                          y = 70513,
+                          text = paste("ACTIVE CASES DROP"),
+                          font = list(color = '#ff9900', family = 'calibri', size = 10),
+                          xref = "x",
+                          yref = "y",
+                          arrowhead = 4,
+                          arrowhead = 3,
+                          arrowsize = 0.4,
+                          showarrow = TRUE,
+                          ax = 10,
+                          ay = 40)%>%
+  
+   plotly::add_annotations(x = as.Date("2020-02-18"),
+                          y = 31,
+                          text = paste("KOREA SOCIAL DISTANCES"),
+                          font = list(color = 'brown', family = 'calibri', size = 10),
+                          xref = "x",
+                          yref = "y",
+                          arrowhead = 4,
+                          arrowhead = 3,
+                          arrowsize = 0.4,
+                          showarrow = TRUE,
+                          ax = 50,
+                          ay = -40)%>%
+  
+  plotly::add_annotations(x = as.Date("2020-03-04"),
+                          y = 5621,
+                          text = paste("NEW CASES DROP"),
+                          font = list(color = 'brown', family = 'calibri', size = 10),
+                          xref = "x",
+                          yref = "y",
+                          arrowhead = 4,
+                          arrowhead = 3,
+                          arrowsize = 1,
+                          showarrow = TRUE,
+                          ax = 50,
+                          ay = -40)%>%
+  
+   plotly::add_annotations(x = as.Date("2020-03-09"),
+                          y = 9172,
+                          text = paste("ITALY-SHUTS DOWN"),
+                          font = list(color = 'green', family = 'calibri', size = 10),
+                          xref = "x",
+                          yref = "y",
+                          arrowhead = 5,
+                          arrowhead = 3,
+                          arrowsize = 1,
+                          showarrow = TRUE,
+                          ax = 0,
+                          ay = -50)%>%
+  
+  plotly::layout(title = "",
+                 legend = list(x = 0.1, y = 0.9),
+                 yaxis = list(title = "Total Confirmed Cases"),
+                 xaxis = list(title = ""),
+                 # paper_bgcolor = "black",
+                 #plot_bgcolor = "#ccffff",
+                 # font = list(color = 'white'),
+                 hovermode = "compare",
+                 margin =  list(
+                   # l = 60,
+                   # r = 40,
+                   b = 10,
+                   t = 10,
+                   pad = 2
+                 ))
+
+
+```
+
